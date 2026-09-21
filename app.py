@@ -3,6 +3,8 @@ import os
 import queue
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import date
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -27,20 +29,49 @@ def get_search_client():
     key = env_value("OLLAMA_API_KEY")
     if not key:
         raise RuntimeError("Environment Variable OLLAMA_API_KEY belum diset di Vercel.")
-    return Client(
-        host="https://ollama.com",
-        headers={"Authorization": f"Bearer {key}"},
-        timeout=100,
-    )
+    return key
 
-def compact_results(results):
+def web_search_direct(query, max_results=4):
+    """Call Ollama's official Web Search REST API directly."""
+    key = get_search_client()
+    payload = json.dumps({
+        "query": query,
+        "max_results": max_results,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://ollama.com/api/web_search",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "H2H-Chat/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+            data = json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Ollama Web Search HTTP {exc.code}: {body[:500]}")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Ollama Web Search network error: {exc.reason}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Ollama Web Search returned invalid JSON: {exc}")
+
+    results = data.get("results")
+    if not isinstance(results, list):
+        raise RuntimeError(f"Format hasil Web Search tidak dikenali: {str(data)[:500]}")
     return [
         {
-            "title": getattr(r, "title", "") or "",
-            "url": getattr(r, "url", "") or "",
-            "content": (getattr(r, "content", "") or "")[:900],
+            "title": str(item.get("title") or ""),
+            "url": str(item.get("url") or ""),
+            "content": str(item.get("content") or "")[:900],
         }
-        for r in results.results
+        for item in results[:max_results]
+        if isinstance(item, dict)
     ]
 
 def sse(event):
@@ -129,11 +160,10 @@ def chat_api():
             if use_web:
                 yield sse({"type": "status", "text": "Mencari informasi terbaru di web…"})
                 try:
-                    search = get_search_client().web_search(
+                    sources = web_search_direct(
                         query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
                         max_results=4,
                     )
-                    sources = compact_results(search)
                     yield sse({
                         "type": "status",
                         "text": f"Web search selesai · {len(sources)} sumber ditemukan",
@@ -147,10 +177,10 @@ def chat_api():
                         f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
                         for x in sources
                     )
-                except Exception:
+                except Exception as exc:
                     yield sse({
                         "type": "status",
-                        "text": "Web search gagal · lanjut tanpa hasil web",
+                        "text": f"Web search gagal · {str(exc)[:220]}",
                     })
                     web_context = (
                         "Pencarian web gagal. Jangan mengklaim bahwa kamu telah "
