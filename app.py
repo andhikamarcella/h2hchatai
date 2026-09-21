@@ -10,8 +10,7 @@ from ollama import Client
 
 app = Flask(__name__)
 
-FAST_MODEL = os.getenv("FAST_MODEL", os.getenv("OLLAMA_MODEL", "qwen3:4b"))
-THINKING_MODEL = os.getenv("THINKING_MODEL", "gemma4:26b")
+MODEL = os.getenv("OLLAMA_MODEL", "gemma4:26b")
 
 SYSTEM_PROMPT = """Kamu teman ngobrol sesama K-poper Indonesia, terutama mengikuti Hearts2Hearts. Jawab santai, natural, hangat, dan seperti fans asli yang ngobrol, bukan artikel atau chatbot formal. Hindari markdown seperti bold, heading, bullet, dan numbering kecuali diminta. Jangan memaksakan slang atau emoji. Jangan mengarang fakta. Untuk hal terkini, gunakan hasil web search yang disediakan dan jelaskan secara jujur jika hasilnya kurang. Anggap pengguna sudah mengenal H2H. Gunakan bahasa Indonesia kecuali diminta lain."""
 
@@ -39,7 +38,7 @@ def compact_results(results):
         {
             "title": getattr(r, "title", "") or "",
             "url": getattr(r, "url", "") or "",
-            "content": (getattr(r, "content", "") or "")[:1000],
+            "content": (getattr(r, "content", "") or "")[:900],
         }
         for r in results.results
     ]
@@ -48,16 +47,10 @@ def sse(event):
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 def keepalive():
-    # SSE comment: invisible to the client, but sends bytes through proxies.
     return ": keep-alive\n\n"
 
-def model_for_mode(mode):
-    return THINKING_MODEL if mode == "thinking" else FAST_MODEL
-
 def stream_model_with_heartbeats(client, **kwargs):
-    """Run model streaming in a worker so the HTTP response can send heartbeats."""
     events = queue.Queue()
-    done = object()
 
     def worker():
         try:
@@ -67,16 +60,14 @@ def stream_model_with_heartbeats(client, **kwargs):
         except Exception as exc:
             events.put(("error", exc))
         finally:
-            events.put(("done", done))
+            events.put(("done", None))
 
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
+    threading.Thread(target=worker, daemon=True).start()
 
     while True:
         try:
             kind, payload = events.get(timeout=4)
         except queue.Empty:
-            # Keeps Cloudflare's proxy connection active while a slow model is generating.
             yield None
             continue
 
@@ -84,16 +75,12 @@ def stream_model_with_heartbeats(client, **kwargs):
             yield payload
         elif kind == "error":
             raise payload
-        elif kind == "done":
+        else:
             break
 
 @app.get("/")
 def index():
-    return render_template(
-        "index.html",
-        fast_model=FAST_MODEL,
-        thinking_model=THINKING_MODEL,
-    )
+    return render_template("index.html", model=MODEL)
 
 @app.get("/api/health")
 def health():
@@ -102,8 +89,7 @@ def health():
         names = [m.model for m in models.models]
         return jsonify({
             "ok": True,
-            "fast_model": FAST_MODEL,
-            "thinking_model": THINKING_MODEL,
+            "model": MODEL,
             "remote_models": names,
         })
     except Exception as exc:
@@ -115,27 +101,21 @@ def chat_api():
     question = str(data.get("message") or "").strip()
     history = data.get("history") or []
     use_web = bool(data.get("use_web", True))
-    mode = str(data.get("mode") or "fast").lower()
-    if mode not in {"fast", "thinking"}:
-        mode = "fast"
 
     if not question:
         return jsonify({"error": "Pesan kosong."}), 400
 
-    model = model_for_mode(mode)
-
     @stream_with_context
     def generate():
         try:
-            sources, web_context = [], ""
+            sources = []
+            web_context = ""
 
-            yield sse({
-                "type": "status",
-                "text": f"Mode {('thinking' if mode == 'thinking' else 'cepat')} · {model}",
-            })
+            yield sse({"type": "status", "text": "Menerima pertanyaan…"})
+            yield sse({"type": "status", "text": f"Model · {MODEL}"})
 
             if use_web:
-                yield sse({"type": "status", "text": "Membuka pencarian web…"})
+                yield sse({"type": "status", "text": "Mencari informasi terbaru di web…"})
                 try:
                     search = get_search_client().web_search(
                         query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
@@ -149,87 +129,67 @@ def chat_api():
                     if sources:
                         yield sse({
                             "type": "status",
-                            "text": f"Membaca {min(len(sources), 6)} sumber dan menyusun konteks…",
+                            "text": "Membaca hasil pencarian dan menyusun konteks…",
                         })
                     web_context = "\n\n".join(
                         f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
                         for x in sources
                     )
-                except Exception as exc:
+                except Exception:
                     yield sse({
                         "type": "status",
-                        "text": "Web search gagal · lanjut memakai percakapan",
+                        "text": "Web search gagal · lanjut tanpa hasil web",
                     })
                     web_context = (
-                        f"Pencarian web gagal ({exc}). "
-                        "Jangan berpura-pura telah melakukan pencarian."
+                        "Pencarian web gagal. Jangan mengklaim bahwa kamu telah "
+                        "memverifikasi informasi lewat web."
                     )
             else:
                 yield sse({"type": "status", "text": "Web search mati · memakai konteks chat"})
 
-            system_prompt = SYSTEM_PROMPT
-            # Gemma 4 documents thinking via the <|think|> control token.
-            if mode == "thinking":
-                system_prompt = "<|think|>\n" + system_prompt
-
-            messages = [{"role": "system", "content": system_prompt}]
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             for item in history[-12:]:
                 role = item.get("role")
                 content = str(item.get("content") or "").strip()
                 if role in ("user", "assistant") and content:
                     messages.append({"role": role, "content": content})
 
-            current = question + (
-                "\n\nKONTEKS WEB:\n" + web_context if web_context else ""
-            )
+            current = question
+            if web_context:
+                current += "\n\nKONTEKS WEB:\n" + web_context
             messages.append({"role": "user", "content": current})
 
-            yield sse({
-                "type": "status",
-                "text": (
-                    "Menganalisis pertanyaan dan konteks…"
-                    if mode == "thinking"
-                    else "Menyiapkan jawaban cepat…"
-                ),
-            })
+            yield sse({"type": "status", "text": "Menganalisis konteks…"})
+            yield sse({"type": "status", "text": "Menulis jawaban…"})
+            yield keepalive()
 
             client = get_model_client()
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "stream": True,
-                "keep_alive": "5m",
-                "options": {
+            stream = stream_model_with_heartbeats(
+                client,
+                model=MODEL,
+                messages=messages,
+                stream=True,
+                keep_alive="5m",
+                options={
                     "temperature": 0.7,
-                    "num_predict": 384 if mode == "fast" else 640,
+                    "num_predict": 512,
                 },
-            }
+            )
 
-            stream = stream_model_with_heartbeats(client, **kwargs)
-
-            # Send an initial chunk so proxies start flushing the SSE response.
-            yield sse({"type": "status", "text": "Model mulai bekerja…"})
-            yield keepalive()
-            last_heartbeat = time.monotonic()
-
-            finished = False
+            last_keepalive = time.monotonic()
             for chunk in stream:
                 if chunk is None:
                     now = time.monotonic()
-                    if now - last_heartbeat >= 4:
+                    if now - last_keepalive >= 4:
                         yield keepalive()
-                        last_heartbeat = now
+                        last_keepalive = now
                     continue
 
                 token = getattr(getattr(chunk, "message", None), "content", "") or ""
                 if token:
                     yield sse({"type": "token", "text": token})
 
-                # Ollama marks the final streamed response with done=True.
-                # Signal completion immediately instead of waiting for the
-                # generator/HTTP connection to close.
                 if bool(getattr(chunk, "done", False)):
-                    finished = True
                     yield sse({
                         "type": "done",
                         "sources": [
@@ -238,17 +198,16 @@ def chat_api():
                             if x["title"] and x["url"]
                         ],
                     })
-                    break
+                    return
 
-            if not finished:
-                yield sse({
-                    "type": "done",
-                    "sources": [
-                        {"title": x["title"], "url": x["url"]}
-                        for x in sources
-                        if x["title"] and x["url"]
-                    ],
-                })
+            yield sse({
+                "type": "done",
+                "sources": [
+                    {"title": x["title"], "url": x["url"]}
+                    for x in sources
+                    if x["title"] and x["url"]
+                ],
+            })
         except Exception as exc:
             yield sse({"type": "error", "error": f"Ollama gagal: {exc}"})
 
