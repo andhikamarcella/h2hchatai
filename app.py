@@ -192,6 +192,7 @@ def chat_api():
             stream = stream_model_with_heartbeats(client, **model_kwargs)
 
             last_keepalive = time.monotonic()
+            answer_parts = []
             for chunk in stream:
                 if chunk is None:
                     now = time.monotonic()
@@ -204,9 +205,28 @@ def chat_api():
                 token = message_field(message, "content", "")
 
                 if token:
+                    answer_parts.append(token)
                     yield sse({"type": "token", "text": token})
 
                 if response_done(chunk):
+                    if not "".join(answer_parts).strip():
+                        yield sse({"type": "status", "text": "Tidak ada teks dari stream · mencoba respons langsung…"})
+                        fallback = client.chat(
+                            model=MODEL,
+                            messages=messages,
+                            stream=False,
+                            keep_alive="5m",
+                            options={"temperature": 0.7, "num_predict": 640},
+                        )
+                        fallback_message = message_field(fallback, "message", None)
+                        fallback_text = message_field(fallback_message, "content", "")
+                        if fallback_text:
+                            answer_parts.append(fallback_text)
+                            yield sse({"type": "token", "text": fallback_text})
+                        else:
+                            yield sse({"type": "error", "error": "Gemma selesai tetapi tidak mengirim teks jawaban. Jalankan ollama run gemma4:26b di Kaggle untuk mengecek model."})
+                            return
+
                     yield sse({
                         "type": "done",
                         "sources": [
@@ -215,6 +235,23 @@ def chat_api():
                             if x["title"] and x["url"]
                         ],
                     })
+                    return
+
+            if not "".join(answer_parts).strip():
+                yield sse({"type": "status", "text": "Stream berakhir tanpa teks · mencoba respons langsung…"})
+                fallback = client.chat(
+                    model=MODEL,
+                    messages=messages,
+                    stream=False,
+                    keep_alive="5m",
+                    options={"temperature": 0.7, "num_predict": 640},
+                )
+                fallback_message = message_field(fallback, "message", None)
+                fallback_text = message_field(fallback_message, "content", "")
+                if fallback_text:
+                    yield sse({"type": "token", "text": fallback_text})
+                else:
+                    yield sse({"type": "error", "error": "Gemma selesai tetapi tidak mengirim teks jawaban. Jalankan ollama run gemma4:26b di Kaggle untuk mengecek model."})
                     return
 
             yield sse({
