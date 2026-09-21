@@ -164,17 +164,27 @@ def chat_api():
             yield keepalive()
 
             client = get_model_client()
-            stream = stream_model_with_heartbeats(
-                client,
-                model=MODEL,
-                messages=messages,
-                stream=True,
-                keep_alive="5m",
-                options={
+            model_kwargs = {
+                "model": MODEL,
+                "messages": messages,
+                "stream": True,
+                "keep_alive": "5m",
+                "options": {
                     "temperature": 0.7,
-                    "num_predict": 512,
+                    "num_predict": 640,
                 },
-            )
+            }
+
+            # Gemma 4 exposes reasoning separately from the final answer.
+            # Keep reasoning internal; stream only final-answer content to the UI.
+            try:
+                stream = stream_model_with_heartbeats(
+                    client,
+                    **model_kwargs,
+                    think=True,
+                )
+            except TypeError:
+                stream = stream_model_with_heartbeats(client, **model_kwargs)
 
             last_keepalive = time.monotonic()
             for chunk in stream:
@@ -185,7 +195,13 @@ def chat_api():
                         last_keepalive = now
                     continue
 
-                token = getattr(getattr(chunk, "message", None), "content", "") or ""
+                message = getattr(chunk, "message", None)
+                token = getattr(message, "content", "") or ""
+                thinking = getattr(message, "thinking", "") or ""
+
+                if thinking:
+                    # Do not expose internal reasoning text. Just signal progress.
+                    yield sse({"type": "activity", "text": "Gemma sedang menganalisis…"})
                 if token:
                     yield sse({"type": "token", "text": token})
 
