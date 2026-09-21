@@ -216,13 +216,21 @@ def chat_api():
                 "keep_alive": "5m",
                 "options": {
                     "temperature": 0.7,
-                    "num_predict": 640,
+                    "num_predict": 512,
                 },
             }
 
-            # Generate the final answer directly. We do not request a separate
-            # thinking stream here, so message.content is always the answer text.
-            stream = stream_model_with_heartbeats(client, **model_kwargs)
+            # Gemma 4 can spend the whole output budget in its internal
+            # thinking channel. For this web app we need a reliable final
+            # answer, so explicitly disable thinking.
+            try:
+                stream = stream_model_with_heartbeats(
+                    client,
+                    **model_kwargs,
+                    think=False,
+                )
+            except TypeError:
+                stream = stream_model_with_heartbeats(client, **model_kwargs)
 
             last_keepalive = time.monotonic()
             answer_parts = []
