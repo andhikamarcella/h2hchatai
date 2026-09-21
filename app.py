@@ -9,7 +9,7 @@ from ollama import Client
 
 app = Flask(__name__)
 
-MODEL = os.getenv("OLLAMA_MODEL", "gemma4:26b")
+MODEL = os.getenv("OLLAMA_MODEL", "gemma4:12b")
 
 SYSTEM_PROMPT = """Kamu teman ngobrol sesama K-poper Indonesia, terutama mengikuti Hearts2Hearts. Jawab santai, natural, hangat, dan seperti fans asli yang ngobrol, bukan artikel atau chatbot formal. Hindari markdown seperti bold, heading, bullet, dan numbering kecuali diminta. Jangan memaksakan slang atau emoji. Jangan mengarang fakta. Untuk hal terkini, gunakan hasil web search yang disediakan dan jelaskan secara jujur jika hasilnya kurang. Anggap pengguna sudah mengenal H2H. Gunakan bahasa Indonesia kecuali diminta lain."""
 
@@ -144,8 +144,8 @@ def chat_api():
             keep_alive=-1,
             options={
                 "temperature": 0.7,
-                "num_predict": 512,
-                "num_ctx": 8192,
+                "num_predict": 384,
+                "num_ctx": 4096,
             },
         )
     except TypeError:
