@@ -1,6 +1,8 @@
+import json
 import os
 from datetime import date
-from flask import Flask, jsonify, render_template, request
+
+from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 from ollama import Client
 
 app = Flask(__name__)
@@ -20,10 +22,24 @@ def get_search_client():
     key = env_value("OLLAMA_API_KEY")
     if not key:
         raise RuntimeError("Environment Variable OLLAMA_API_KEY belum diset di Vercel.")
-    return Client(host="https://ollama.com", headers={"Authorization": f"Bearer {key}"}, timeout=100)
+    return Client(
+        host="https://ollama.com",
+        headers={"Authorization": f"Bearer {key}"},
+        timeout=100,
+    )
 
 def compact_results(results):
-    return [{"title": getattr(r, "title", "") or "", "url": getattr(r, "url", "") or "", "content": (getattr(r, "content", "") or "")[:1800]} for r in results.results]
+    return [
+        {
+            "title": getattr(r, "title", "") or "",
+            "url": getattr(r, "url", "") or "",
+            "content": (getattr(r, "content", "") or "")[:1800],
+        }
+        for r in results.results
+    ]
+
+def sse(event):
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 @app.get("/")
 def index():
@@ -33,7 +49,11 @@ def index():
 def health():
     try:
         models = get_model_client().list()
-        return jsonify({"ok": True, "model": MODEL, "remote_models": [m.model for m in models.models]})
+        return jsonify({
+            "ok": True,
+            "model": MODEL,
+            "remote_models": [m.model for m in models.models],
+        })
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
@@ -43,33 +63,96 @@ def chat_api():
     question = str(data.get("message") or "").strip()
     history = data.get("history") or []
     use_web = bool(data.get("use_web", True))
+
     if not question:
         return jsonify({"error": "Pesan kosong."}), 400
 
-    sources, web_context = [], ""
-    if use_web:
+    @stream_with_context
+    def generate():
         try:
-            search = get_search_client().web_search(query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop", max_results=6)
-            sources = compact_results(search)
-            web_context = "\n\n".join(f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}" for x in sources)
-        except Exception as exc:
-            web_context = f"Pencarian web gagal ({exc}). Jangan berpura-pura telah melakukan pencarian."
+            sources, web_context = [], ""
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    # Client sends prior turns only; append the current question exactly once.
-    for item in history[-16:]:
-        role, content = item.get("role"), str(item.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            messages.append({"role": role, "content": content})
-    current = question + ("\n\nKONTEKS WEB:\n" + web_context if web_context else "")
-    messages.append({"role": "user", "content": current})
-    try:
-        result = get_model_client().chat(model=MODEL, messages=messages, stream=False)
-        answer = (result.message.content or "").strip()
-        return jsonify({"answer": answer, "sources": [{"title": x["title"], "url": x["url"]} for x in sources if x["title"] and x["url"]]})
-    except Exception as exc:
-        return jsonify({"error": f"Ollama gagal: {exc}"}), 502
+            if use_web:
+                yield sse({"type": "status", "text": "Mencari info terbaru di web…"})
+                try:
+                    search = get_search_client().web_search(
+                        query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
+                        max_results=6,
+                    )
+                    sources = compact_results(search)
+                    yield sse({
+                        "type": "status",
+                        "text": f"Menemukan {len(sources)} sumber. Membaca konteksnya…",
+                    })
+                    web_context = "\n\n".join(
+                        f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
+                        for x in sources
+                    )
+                except Exception as exc:
+                    yield sse({
+                        "type": "status",
+                        "text": "Web search gagal, jadi aku lanjut tanpa hasil web.",
+                    })
+                    web_context = (
+                        f"Pencarian web gagal ({exc}). "
+                        "Jangan berpura-pura telah melakukan pencarian."
+                    )
+            else:
+                yield sse({"type": "status", "text": "Menyiapkan konteks percakapan… "})
+
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            for item in history[-16:]:
+                role = item.get("role")
+                content = str(item.get("content") or "").strip()
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+
+            current = question + (
+                "\n\nKONTEKS WEB:\n" + web_context if web_context else ""
+            )
+            messages.append({"role": "user", "content": current})
+
+            yield sse({
+                "type": "status",
+                "text": "Menganalisis konteks dan menyiapkan jawaban…",
+            })
+
+            stream = get_model_client().chat(
+                model=MODEL,
+                messages=messages,
+                stream=True,
+            )
+
+            yield sse({"type": "status", "text": "Menulis jawaban…"})
+            for chunk in stream:
+                token = getattr(getattr(chunk, "message", None), "content", "") or ""
+                if token:
+                    yield sse({"type": "token", "text": token})
+
+            yield sse({
+                "type": "done",
+                "sources": [
+                    {"title": x["title"], "url": x["url"]}
+                    for x in sources
+                    if x["title"] and x["url"]
+                ],
+            })
+        except Exception as exc:
+            yield sse({"type": "error", "error": f"Ollama gagal: {exc}"})
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # Vercel imports this module; local development can run it directly.
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.getenv("PORT", "5000")), debug=False)
+    app.run(
+        host="127.0.0.1",
+        port=int(os.getenv("PORT", "5000")),
+        debug=False,
+    )
