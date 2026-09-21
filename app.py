@@ -1,13 +1,10 @@
 import json
 import os
-import queue
-import threading
-import time
 import urllib.error
 import urllib.request
 from datetime import date
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, jsonify, render_template, request
 from ollama import Client
 
 app = Flask(__name__)
@@ -25,16 +22,14 @@ def get_model_client():
         raise RuntimeError("Environment Variable OLLAMA_HOST belum diset di Vercel.")
     return Client(host=host, timeout=280)
 
-def get_search_client():
+def get_search_key():
     key = env_value("OLLAMA_API_KEY")
     if not key:
         raise RuntimeError("Environment Variable OLLAMA_API_KEY belum diset di Vercel.")
     return key
 
 def web_search_direct(query, max_results=4):
-    """Call Ollama's official Web Search REST API directly."""
-    key = get_search_client()
-    # The documented REST body only requires query; cap results locally.
+    key = get_search_key()
     payload = json.dumps({"query": query}).encode("utf-8")
     req = urllib.request.Request(
         "https://ollama.com/api/web_search",
@@ -49,8 +44,7 @@ def web_search_direct(query, max_results=4):
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-            data = json.loads(raw)
+            data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Ollama Web Search HTTP {exc.code}: {body[:500]}")
@@ -62,6 +56,7 @@ def web_search_direct(query, max_results=4):
     results = data.get("results")
     if not isinstance(results, list):
         raise RuntimeError(f"Format hasil Web Search tidak dikenali: {str(data)[:500]}")
+
     return [
         {
             "title": str(item.get("title") or ""),
@@ -72,52 +67,12 @@ def web_search_direct(query, max_results=4):
         if isinstance(item, dict)
     ]
 
-def sse(event):
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-def keepalive():
-    return ": keep-alive\n\n"
-
 def message_field(message, name, default=""):
     if message is None:
         return default
     if isinstance(message, dict):
         return message.get(name, default) or default
     return getattr(message, name, default) or default
-
-def response_done(chunk):
-    if isinstance(chunk, dict):
-        return bool(chunk.get("done", False))
-    return bool(getattr(chunk, "done", False))
-
-def stream_model_with_heartbeats(client, **kwargs):
-    events = queue.Queue()
-
-    def worker():
-        try:
-            stream = client.chat(**kwargs)
-            for chunk in stream:
-                events.put(("chunk", chunk))
-        except Exception as exc:
-            events.put(("error", exc))
-        finally:
-            events.put(("done", None))
-
-    threading.Thread(target=worker, daemon=True).start()
-
-    while True:
-        try:
-            kind, payload = events.get(timeout=4)
-        except queue.Empty:
-            yield None
-            continue
-
-        if kind == "chunk":
-            yield payload
-        elif kind == "error":
-            raise payload
-        else:
-            break
 
 @app.get("/")
 def index():
@@ -127,11 +82,10 @@ def index():
 def health():
     try:
         models = get_model_client().list()
-        names = [m.model for m in models.models]
         return jsonify({
             "ok": True,
             "model": MODEL,
-            "remote_models": names,
+            "remote_models": [m.model for m in models.models],
         })
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
@@ -146,175 +100,88 @@ def chat_api():
     if not question:
         return jsonify({"error": "Pesan kosong."}), 400
 
-    @stream_with_context
-    def generate():
+    sources = []
+    web_context = ""
+
+    if use_web:
         try:
-            sources = []
-            web_context = ""
+            primary_query = (
+                f"{question} latest current {date.today().isoformat()} "
+                "Hearts2Hearts K-pop"
+            )
+            sources = web_search_direct(primary_query, 4)
+            if not sources:
+                sources = web_search_direct(question, 4)
 
-            yield sse({"type": "status", "text": "Menerima pertanyaan…"})
-            yield sse({"type": "status", "text": f"Model · {MODEL}"})
+            web_context = "\n\n".join(
+                f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
+                for x in sources
+            )
+        except Exception:
+            web_context = (
+                "Pencarian web gagal. Jangan mengklaim bahwa kamu telah "
+                "memverifikasi informasi lewat web."
+            )
 
-            if use_web:
-                yield sse({"type": "status", "text": "Mencari informasi terbaru di web…"})
-                try:
-                    primary_query = f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop"
-                    sources = web_search_direct(query=primary_query, max_results=4)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for item in history[-12:]:
+        role = item.get("role")
+        content = str(item.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
 
-                    # Some queries are too specific for search engines. Retry once
-                    # with the user's natural wording if the first search is empty.
-                    if not sources:
-                        yield sse({"type": "status", "text": "Hasil kosong · mencoba pencarian yang lebih umum…"})
-                        sources = web_search_direct(query=question, max_results=4)
+    current = question
+    if web_context:
+        current += "\n\nKONTEKS WEB:\n" + web_context
+    messages.append({"role": "user", "content": current})
 
-                    yield sse({
-                        "type": "status",
-                        "text": f"Web search selesai · {len(sources)} sumber ditemukan",
-                    })
-                    if sources:
-                        yield sse({
-                            "type": "status",
-                            "text": "Membaca hasil pencarian dan menyusun konteks…",
-                        })
-                    web_context = "\n\n".join(
-                        f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
-                        for x in sources
-                    )
-                except Exception as exc:
-                    yield sse({
-                        "type": "status",
-                        "text": f"Web search gagal · {str(exc)[:220]}",
-                    })
-                    web_context = (
-                        "Pencarian web gagal. Jangan mengklaim bahwa kamu telah "
-                        "memverifikasi informasi lewat web."
-                    )
-            else:
-                yield sse({"type": "status", "text": "Web search mati · memakai konteks chat"})
+    try:
+        result = get_model_client().chat(
+            model=MODEL,
+            messages=messages,
+            stream=False,
+            think=False,
+            keep_alive=-1,
+            options={
+                "temperature": 0.7,
+                "num_predict": 512,
+                "num_ctx": 8192,
+            },
+        )
+    except TypeError:
+        result = get_model_client().chat(
+            model=MODEL,
+            messages=messages,
+            stream=False,
+            keep_alive=-1,
+            options={
+                "temperature": 0.7,
+                "num_predict": 512,
+                "num_ctx": 8192,
+            },
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Ollama gagal: {exc}"}), 502
 
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            for item in history[-12:]:
-                role = item.get("role")
-                content = str(item.get("content") or "").strip()
-                if role in ("user", "assistant") and content:
-                    messages.append({"role": role, "content": content})
+    message = message_field(result, "message", None)
+    answer = message_field(message, "content", "").strip()
 
-            current = question
-            if web_context:
-                current += "\n\nKONTEKS WEB:\n" + web_context
-            messages.append({"role": "user", "content": current})
+    if not answer:
+        return jsonify({
+            "error": (
+                "Gemma selesai tetapi tidak mengirim teks jawaban. "
+                "Periksa model Gemma di Kaggle."
+            )
+        }), 502
 
-            yield sse({"type": "status", "text": "Menganalisis konteks…"})
-            yield sse({"type": "status", "text": "Menulis jawaban…"})
-            yield keepalive()
-
-            client = get_model_client()
-            model_kwargs = {
-                "model": MODEL,
-                "messages": messages,
-                "stream": True,
-                "keep_alive": "5m",
-                "options": {
-                    "temperature": 0.7,
-                    "num_predict": 512,
-                },
-            }
-
-            # Gemma 4 can spend the whole output budget in its internal
-            # thinking channel. For this web app we need a reliable final
-            # answer, so explicitly disable thinking.
-            try:
-                stream = stream_model_with_heartbeats(
-                    client,
-                    **model_kwargs,
-                    think=False,
-                )
-            except TypeError:
-                stream = stream_model_with_heartbeats(client, **model_kwargs)
-
-            last_keepalive = time.monotonic()
-            answer_parts = []
-            for chunk in stream:
-                if chunk is None:
-                    now = time.monotonic()
-                    if now - last_keepalive >= 4:
-                        yield keepalive()
-                        last_keepalive = now
-                    continue
-
-                message = message_field(chunk, "message", None)
-                token = message_field(message, "content", "")
-
-                if token:
-                    answer_parts.append(token)
-                    yield sse({"type": "token", "text": token})
-
-                if response_done(chunk):
-                    if not "".join(answer_parts).strip():
-                        yield sse({"type": "status", "text": "Tidak ada teks dari stream · mencoba respons langsung…"})
-                        fallback = client.chat(
-                            model=MODEL,
-                            messages=messages,
-                            stream=False,
-                            keep_alive="-1",
-                            options={"temperature": 0.7, "num_predict": 640, "num_ctx": 8192},
-                        )
-                        fallback_message = message_field(fallback, "message", None)
-                        fallback_text = message_field(fallback_message, "content", "")
-                        if fallback_text:
-                            answer_parts.append(fallback_text)
-                            yield sse({"type": "token", "text": fallback_text})
-                        else:
-                            yield sse({"type": "error", "error": "Gemma selesai tetapi tidak mengirim teks jawaban. Jalankan ollama run gemma4:26b di Kaggle untuk mengecek model."})
-                            return
-
-                    yield sse({
-                        "type": "done",
-                        "sources": [
-                            {"title": x["title"], "url": x["url"]}
-                            for x in sources
-                            if x["title"] and x["url"]
-                        ],
-                    })
-                    return
-
-            if not "".join(answer_parts).strip():
-                yield sse({"type": "status", "text": "Stream berakhir tanpa teks · mencoba respons langsung…"})
-                fallback = client.chat(
-                    model=MODEL,
-                    messages=messages,
-                    stream=False,
-                    keep_alive="-1",
-                    options={"temperature": 0.7, "num_predict": 640, "num_ctx": 8192},
-                )
-                fallback_message = message_field(fallback, "message", None)
-                fallback_text = message_field(fallback_message, "content", "")
-                if fallback_text:
-                    yield sse({"type": "token", "text": fallback_text})
-                else:
-                    yield sse({"type": "error", "error": "Gemma selesai tetapi tidak mengirim teks jawaban. Jalankan ollama run gemma4:26b di Kaggle untuk mengecek model."})
-                    return
-
-            yield sse({
-                "type": "done",
-                "sources": [
-                    {"title": x["title"], "url": x["url"]}
-                    for x in sources
-                    if x["title"] and x["url"]
-                ],
-            })
-        except Exception as exc:
-            yield sse({"type": "error", "error": f"Ollama gagal: {exc}"})
-
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
+    return jsonify({
+        "answer": answer,
+        "sources": [
+            {"title": x["title"], "url": x["url"]}
+            for x in sources
+            if x["title"] and x["url"]
+        ],
+    })
 
 if __name__ == "__main__":
     app.run(
