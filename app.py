@@ -39,13 +39,17 @@ def compact_results(results):
         {
             "title": getattr(r, "title", "") or "",
             "url": getattr(r, "url", "") or "",
-            "content": (getattr(r, "content", "") or "")[:1800],
+            "content": (getattr(r, "content", "") or "")[:1000],
         }
         for r in results.results
     ]
 
 def sse(event):
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+def keepalive():
+    # SSE comment: invisible to the client, but sends bytes through proxies.
+    return ": keep-alive\n\n"
 
 def model_for_mode(mode):
     return THINKING_MODEL if mode == "thinking" else FAST_MODEL
@@ -70,7 +74,7 @@ def stream_model_with_heartbeats(client, **kwargs):
 
     while True:
         try:
-            kind, payload = events.get(timeout=12)
+            kind, payload = events.get(timeout=4)
         except queue.Empty:
             # Keeps Cloudflare's proxy connection active while a slow model is generating.
             yield None
@@ -135,7 +139,7 @@ def chat_api():
                 try:
                     search = get_search_client().web_search(
                         query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
-                        max_results=6,
+                        max_results=4,
                     )
                     sources = compact_results(search)
                     yield sse({
@@ -163,8 +167,13 @@ def chat_api():
             else:
                 yield sse({"type": "status", "text": "Web search mati · memakai konteks chat"})
 
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            for item in history[-16:]:
+            system_prompt = SYSTEM_PROMPT
+            # Gemma 4 documents thinking via the <|think|> control token.
+            if mode == "thinking":
+                system_prompt = "<|think|>\n" + system_prompt
+
+            messages = [{"role": "system", "content": system_prompt}]
+            for item in history[-12:]:
                 role = item.get("role")
                 content = str(item.get("content") or "").strip()
                 if role in ("user", "assistant") and content:
@@ -189,26 +198,26 @@ def chat_api():
                 "model": model,
                 "messages": messages,
                 "stream": True,
+                "keep_alive": "5m",
+                "options": {
+                    "temperature": 0.7,
+                    "num_predict": 384 if mode == "fast" else 640,
+                },
             }
-            if mode == "thinking":
-                kwargs["think"] = True
 
-            # Compatibility fallback for older Ollama Python clients.
-            try:
-                stream = stream_model_with_heartbeats(client, **kwargs)
-            except TypeError:
-                kwargs.pop("think", None)
-                stream = stream_model_with_heartbeats(client, **kwargs)
+            stream = stream_model_with_heartbeats(client, **kwargs)
 
+            # Send an initial chunk so proxies start flushing the SSE response.
             yield sse({"type": "status", "text": "Model mulai bekerja…"})
+            yield keepalive()
             last_heartbeat = time.monotonic()
 
             finished = False
             for chunk in stream:
                 if chunk is None:
                     now = time.monotonic()
-                    if now - last_heartbeat >= 10:
-                        yield sse({"type": "heartbeat", "text": "Masih bekerja…"})
+                    if now - last_heartbeat >= 4:
+                        yield keepalive()
                         last_heartbeat = now
                     continue
 
