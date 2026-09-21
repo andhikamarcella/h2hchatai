@@ -120,7 +120,10 @@ const response=await fetch('/api/chat',{method:'POST',cache:'no-store',headers:{
 if(!response.ok){let data={};try{data=await response.json()}catch{}throw new Error(data.error||'Request gagal')}
 state=startStreamingAssistant();
 const sources=await consumeChatStream(response,state);
-const answer=state.bubble.textContent||'Model tidak mengembalikan jawaban.';
+const answer=(state?.bubble?.textContent||'').trim();
+if(!answer){
+  throw new Error('Server selesai tetapi teks jawaban kosong. Pastikan Gemma 4 26B tersedia di Ollama Kaggle.');
+}
 c.messages.push({role:'assistant',content:answer,sources});appendSources(sources);
 }catch(e){
 $('activity')?.remove();state?.row?.remove();const raw=String(e?.message||e);
