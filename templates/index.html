@@ -298,6 +298,18 @@ function load(){
     chats = JSON.parse(localStorage.getItem(STORAGE) || '{}') || {};
   }catch{ chats = {}; }
 
+  // Migrate conversations from the previous UI version so existing chats
+  // are not lost after the frontend upgrade.
+  if(!Object.keys(chats).length){
+    try{
+      const legacy = JSON.parse(localStorage.getItem('h2h-chat-conversations-v1') || '{}') || {};
+      if(Object.keys(legacy).length){
+        chats = legacy;
+        localStorage.setItem(STORAGE, JSON.stringify(chats));
+      }
+    }catch{}
+  }
+
   const savedActive = localStorage.getItem(ACTIVE);
   const ids = Object.keys(chats).filter(id => chats[id] && Array.isArray(chats[id].messages));
 
