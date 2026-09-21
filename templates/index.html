@@ -55,8 +55,37 @@ function activityDone(text='selesai'){const el=ensureActivity();const state=el.q
 function startStreamingAssistant(){const row=document.createElement('div');row.className='message assistant';const bubble=document.createElement('div');bubble.className='bubble';const cursor=document.createElement('span');cursor.className='streaming-cursor';bubble.appendChild(cursor);row.appendChild(bubble);feed.appendChild(row);return{row,bubble,cursor}}
 function addStreamToken(state,text){state.cursor.remove();state.bubble.appendChild(document.createTextNode(text));state.bubble.appendChild(state.cursor);feed.scrollTop=feed.scrollHeight}
 async function consumeChatStream(response,state){
-const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',sources=[];
-while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parts=buffer.split(/\n\n/);buffer=parts.pop()||'';for(const part of parts){const line=part.split(/\n/).find(x=>x.startsWith('data: '));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.type==='status'){addActivity(event.text,true)}else if(event.type==='heartbeat'){addActivity('Model masih bekerja…',true)}else if(event.type==='token'){if(!state)state=startStreamingAssistant();addStreamToken(state,event.text)}else if(event.type==='done'){sources=event.sources||[];activityDone('selesai')}else if(event.type==='error')throw new Error(event.error||'Request gagal')}}return sources}
+const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',sources=[],finished=false;
+while(true){
+  const {value,done}=await reader.read();
+  if(done)break;
+  buffer+=decoder.decode(value,{stream:true});
+  const parts=buffer.split(/\n\n/);buffer=parts.pop()||'';
+  for(const part of parts){
+    const line=part.split(/\n/).find(x=>x.startsWith('data: '));if(!line)continue;
+    const event=JSON.parse(line.slice(6));
+    if(event.type==='status'){
+      addActivity(event.text,true)
+    }else if(event.type==='heartbeat'){
+      addActivity('Model masih bekerja…',true)
+    }else if(event.type==='token'){
+      if(!state)state=startStreamingAssistant();
+      if($('activity'))addActivity('Jawaban sedang ditulis…',true);
+      addStreamToken(state,event.text)
+    }else if(event.type==='done'){
+      finished=true;
+      sources=event.sources||[];
+      if(state?.cursor)state.cursor.remove();
+      activityDone('selesai');
+      return sources;
+    }else if(event.type==='error'){
+      throw new Error(event.error||'Request gagal')
+    }
+  }
+}
+if(!finished)activityDone('selesai');
+return sources
+}
 function updateModeUI(){document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));$('modelBadge').textContent=models[mode];$('hint').textContent=(mode==='thinking'?'Thinking':'Cepat')+' · '+($('webSearch').checked?'Web search aktif':'Web search mati')}
 document.querySelectorAll('.mode-btn').forEach(b=>b.onclick=()=>{if($('send').disabled)return;mode=b.dataset.mode;updateModeUI()});$('webSearch').onchange=updateModeUI;
 
