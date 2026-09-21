@@ -49,6 +49,18 @@ def sse(event):
 def keepalive():
     return ": keep-alive\n\n"
 
+def message_field(message, name, default=""):
+    if message is None:
+        return default
+    if isinstance(message, dict):
+        return message.get(name, default) or default
+    return getattr(message, name, default) or default
+
+def response_done(chunk):
+    if isinstance(chunk, dict):
+        return bool(chunk.get("done", False))
+    return bool(getattr(chunk, "done", False))
+
 def stream_model_with_heartbeats(client, **kwargs):
     events = queue.Queue()
 
@@ -175,16 +187,9 @@ def chat_api():
                 },
             }
 
-            # Gemma 4 exposes reasoning separately from the final answer.
-            # Keep reasoning internal; stream only final-answer content to the UI.
-            try:
-                stream = stream_model_with_heartbeats(
-                    client,
-                    **model_kwargs,
-                    think=True,
-                )
-            except TypeError:
-                stream = stream_model_with_heartbeats(client, **model_kwargs)
+            # Generate the final answer directly. We do not request a separate
+            # thinking stream here, so message.content is always the answer text.
+            stream = stream_model_with_heartbeats(client, **model_kwargs)
 
             last_keepalive = time.monotonic()
             for chunk in stream:
@@ -195,17 +200,13 @@ def chat_api():
                         last_keepalive = now
                     continue
 
-                message = getattr(chunk, "message", None)
-                token = getattr(message, "content", "") or ""
-                thinking = getattr(message, "thinking", "") or ""
+                message = message_field(chunk, "message", None)
+                token = message_field(message, "content", "")
 
-                if thinking:
-                    # Do not expose internal reasoning text. Just signal progress.
-                    yield sse({"type": "activity", "text": "Gemma sedang menganalisis…"})
                 if token:
                     yield sse({"type": "token", "text": token})
 
-                if bool(getattr(chunk, "done", False)):
+                if response_done(chunk):
                     yield sse({
                         "type": "done",
                         "sources": [
