@@ -6,7 +6,10 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 from ollama import Client
 
 app = Flask(__name__)
-MODEL = os.getenv("OLLAMA_MODEL", "gemma4:26b")
+
+FAST_MODEL = os.getenv("FAST_MODEL", os.getenv("OLLAMA_MODEL", "qwen3:4b"))
+THINKING_MODEL = os.getenv("THINKING_MODEL", "qwen3:8b")
+
 SYSTEM_PROMPT = """Kamu teman ngobrol sesama K-poper Indonesia, terutama mengikuti Hearts2Hearts. Jawab santai, natural, hangat, dan seperti fans asli yang ngobrol, bukan artikel atau chatbot formal. Hindari markdown seperti bold, heading, bullet, dan numbering kecuali diminta. Jangan memaksakan slang atau emoji. Jangan mengarang fakta. Untuk hal terkini, gunakan hasil web search yang disediakan dan jelaskan secara jujur jika hasilnya kurang. Anggap pengguna sudah mengenal H2H. Gunakan bahasa Indonesia kecuali diminta lain."""
 
 def env_value(name):
@@ -41,18 +44,27 @@ def compact_results(results):
 def sse(event):
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
+def model_for_mode(mode):
+    return THINKING_MODEL if mode == "thinking" else FAST_MODEL
+
 @app.get("/")
 def index():
-    return render_template("index.html", model=MODEL)
+    return render_template(
+        "index.html",
+        fast_model=FAST_MODEL,
+        thinking_model=THINKING_MODEL,
+    )
 
 @app.get("/api/health")
 def health():
     try:
         models = get_model_client().list()
+        names = [m.model for m in models.models]
         return jsonify({
             "ok": True,
-            "model": MODEL,
-            "remote_models": [m.model for m in models.models],
+            "fast_model": FAST_MODEL,
+            "thinking_model": THINKING_MODEL,
+            "remote_models": names,
         })
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
@@ -63,17 +75,30 @@ def chat_api():
     question = str(data.get("message") or "").strip()
     history = data.get("history") or []
     use_web = bool(data.get("use_web", True))
+    mode = str(data.get("mode") or "fast").lower()
+    if mode not in {"fast", "thinking"}:
+        mode = "fast"
 
     if not question:
         return jsonify({"error": "Pesan kosong."}), 400
+
+    model = model_for_mode(mode)
 
     @stream_with_context
     def generate():
         try:
             sources, web_context = [], ""
 
+            yield sse({
+                "type": "status",
+                "text": (
+                    f"Mode {('thinking' if mode == 'thinking' else 'cepat')} aktif · "
+                    f"{model}"
+                ),
+            })
+
             if use_web:
-                yield sse({"type": "status", "text": "Mencari info terbaru di web…"})
+                yield sse({"type": "status", "text": "Mencari informasi terbaru di web…"})
                 try:
                     search = get_search_client().web_search(
                         query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
@@ -82,8 +107,15 @@ def chat_api():
                     sources = compact_results(search)
                     yield sse({
                         "type": "status",
-                        "text": f"Menemukan {len(sources)} sumber. Membaca konteksnya…",
+                        "text": f"Web search selesai · {len(sources)} sumber ditemukan",
                     })
+                    for source in sources:
+                        title = source["title"].strip()
+                        if title:
+                            yield sse({
+                                "type": "activity",
+                                "text": f"Meninjau sumber · {title}",
+                            })
                     web_context = "\n\n".join(
                         f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
                         for x in sources
@@ -91,14 +123,14 @@ def chat_api():
                 except Exception as exc:
                     yield sse({
                         "type": "status",
-                        "text": "Web search gagal, jadi aku lanjut tanpa hasil web.",
+                        "text": "Web search gagal · melanjutkan tanpa hasil web",
                     })
                     web_context = (
                         f"Pencarian web gagal ({exc}). "
                         "Jangan berpura-pura telah melakukan pencarian."
                     )
             else:
-                yield sse({"type": "status", "text": "Menyiapkan konteks percakapan… "})
+                yield sse({"type": "status", "text": "Web search dimatikan · memakai konteks chat"})
 
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             for item in history[-16:]:
@@ -112,18 +144,38 @@ def chat_api():
             )
             messages.append({"role": "user", "content": current})
 
+            if mode == "thinking":
+                yield sse({
+                    "type": "status",
+                    "text": "Menganalisis konteks dan menyusun jawaban…",
+                })
+            else:
+                yield sse({
+                    "type": "status",
+                    "text": "Menyiapkan jawaban cepat…",
+                })
+
+            client = get_model_client()
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
+            }
+            if mode == "thinking":
+                kwargs["think"] = True
+
+            try:
+                stream = client.chat(**kwargs)
+            except TypeError:
+                # Compatibility fallback for older Ollama Python clients.
+                kwargs.pop("think", None)
+                stream = client.chat(**kwargs)
+
             yield sse({
                 "type": "status",
-                "text": "Menganalisis konteks dan menyiapkan jawaban…",
+                "text": "Model sedang menulis jawaban…",
             })
 
-            stream = get_model_client().chat(
-                model=MODEL,
-                messages=messages,
-                stream=True,
-            )
-
-            yield sse({"type": "status", "text": "Menulis jawaban…"})
             for chunk in stream:
                 token = getattr(getattr(chunk, "message", None), "content", "") or ""
                 if token:
@@ -149,7 +201,6 @@ def chat_api():
         },
     )
 
-# Vercel imports this module; local development can run it directly.
 if __name__ == "__main__":
     app.run(
         host="127.0.0.1",
