@@ -6,13 +6,61 @@
 <title>H2H Chat</title>
 <style>
 :root{color-scheme:dark;--bg:#212121;--side:#171717;--line:#414141;--text:#ececec;--muted:#a1a1aa}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 72% -10%,#303030 0,transparent 28%),var(--bg);color:var(--text);font:15px/1.6 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;height:100dvh;overflow:hidden}
-.layout{display:grid;grid-template-columns:260px 1fr;height:100dvh}.sidebar{background:rgba(23,23,23,.96);padding:14px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #292929;min-width:0}.brand{font-weight:700;font-size:18px;padding:7px 8px}.btn{color:var(--text);background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:left;cursor:pointer;font:inherit;transition:.16s}.btn:hover,.thread:hover{background:#292929}.thread-list{overflow:auto;display:flex;flex-direction:column;gap:5px}.thread{border:0;background:transparent;color:#ddd;text-align:left;padding:9px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:13px inherit}.thread.active{background:#343434}.side-bottom{margin-top:auto;color:var(--muted);font-size:12px;padding:8px}
-.main{display:flex;flex-direction:column;min-width:0;height:100dvh}.top{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 22px;border-bottom:1px solid #303030;backdrop-filter:blur(12px)}.top-left{display:flex;align-items:center;gap:10px}.model-badge{font-size:13px;font-weight:700}.mode-switch{display:flex;gap:4px;background:#1b1b1b;border:1px solid #373737;padding:4px;border-radius:12px}.mode-btn{border:1px solid transparent;border-radius:8px;background:transparent;color:#aaa;padding:7px 10px;cursor:pointer;font:12px inherit}.mode-btn:hover{color:#eee;background:#292929}.mode-btn.active{background:#333;color:#fff;border-color:#4b4b4b}.toggle{font-size:13px;color:#ccc;display:flex;gap:8px;align-items:center}.feed{flex:1;overflow:auto;padding:28px 20px 170px;scroll-behavior:smooth}.welcome{max-width:720px;margin:14vh auto 0;text-align:center}.welcome h1{font-size:32px;line-height:1.2;margin:0 0 12px}.welcome p{color:var(--muted)}
-.message{width:min(790px,100%);margin:0 auto 24px;display:flex}.message.user{justify-content:flex-end}.bubble{max-width:85%;padding:12px 17px;border-radius:20px;white-space:pre-wrap;overflow-wrap:anywhere}.user .bubble{background:#303030;border:1px solid #414141}.assistant .bubble{padding-left:0;padding-right:0}.sources{width:min(790px,100%);margin:-14px auto 24px;display:flex;flex-wrap:wrap;gap:7px}.sources a{color:#c4d7ff;background:#292929;border:1px solid #414141;border-radius:9px;padding:6px 9px;text-decoration:none;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.activity{width:min(790px,100%);margin:0 auto 18px;border:1px solid #383838;background:rgba(26,26,26,.76);border-radius:15px;overflow:hidden;box-shadow:0 12px 28px #0002}.activity-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;color:#d7d7db;font-size:12px;border-bottom:1px solid #343434}.activity-state{display:inline-flex;align-items:center;gap:7px;color:#aeb0b7}.activity-state::before{content:"";width:7px;height:7px;border-radius:50%;background:#ddd;box-shadow:0 0 10px #ddd;animation:pulse 1.1s ease-in-out infinite}.activity.done .activity-state::before{animation:none;box-shadow:none;background:#888}.activity-log{padding:9px 12px 10px;max-height:145px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a7a9b2}.activity-line{padding:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:lineIn .16s ease}.activity-line::before{content:"› ";color:#eee}.activity-line.current::after{content:"";display:inline-block;width:6px;height:12px;margin-left:3px;vertical-align:-2px;background:#929292;animation:blink .8s steps(1) infinite}.activity.done{opacity:.72}.activity.done .activity-log{max-height:64px}@keyframes pulse{50%{opacity:.45;transform:scale(.82)}}@keyframes lineIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}@keyframes blink{50%{opacity:0}}
-.streaming-cursor{display:inline-block;width:7px;height:17px;margin-left:2px;vertical-align:-3px;background:#aaa;animation:blink .9s steps(1) infinite}.composer-area{position:fixed;bottom:0;left:260px;right:0;padding:18px 20px 22px;background:linear-gradient(transparent,var(--bg) 24%)}.composer{width:min(790px,100%);margin:auto;background:#2f2f2f;border:1px solid #505050;border-radius:25px;padding:10px 12px;box-shadow:0 5px 30px #0002}.composer textarea{display:block;width:100%;min-height:42px;max-height:180px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:8px 10px}.composer-bottom{display:flex;align-items:center;justify-content:space-between;padding:3px 3px 0 9px}.hint{font-size:11px;color:#999}.send{border:0;border-radius:50%;width:38px;height:38px;background:#f4f4f4;color:#161616;font-size:23px;cursor:pointer}.send:disabled{opacity:.45}.mobile-menu{display:none}
-@media(max-width:760px){.layout{grid-template-columns:1fr}.sidebar{position:fixed;z-index:5;inset:0 auto 0 0;width:270px;transform:translateX(-100%);transition:transform .2s;box-shadow:10px 0 30px #0005}.sidebar.open{transform:translateX(0)}.composer-area{left:0;padding:12px 12px 16px}.feed{padding:22px 14px 145px}.bubble{max-width:92%}.top{padding:9px 14px;flex-wrap:wrap}.mode-switch{order:3;width:100%}.mode-btn{flex:1}.toggle{margin-left:auto}.mobile-menu{display:inline-block}}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 72% -10%,#303030 0,transparent 28%),var(--bg);color:var(--text);font:15px/1.6 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;height:100dvh;overflow:hidden}
+.layout{display:grid;grid-template-columns:260px 1fr;height:100dvh}
+.sidebar{background:rgba(23,23,23,.96);padding:14px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #292929;min-width:0}
+.brand{font-weight:700;font-size:18px;padding:7px 8px}
+.btn{color:var(--text);background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:left;cursor:pointer;font:inherit;transition:.16s}
+.btn:hover,.thread:hover{background:#292929}
+.thread-list{overflow:auto;display:flex;flex-direction:column;gap:5px}
+.thread{border:0;background:transparent;color:#ddd;text-align:left;padding:9px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:13px inherit}
+.thread.active{background:#343434}
+.side-bottom{margin-top:auto;color:var(--muted);font-size:12px;padding:8px}
+.main{display:flex;flex-direction:column;min-width:0;height:100dvh}
+.top{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 22px;border-bottom:1px solid #303030;backdrop-filter:blur(12px)}
+.top-left{display:flex;align-items:center;gap:10px}
+.model-badge{font-size:13px;font-weight:700}
+.web-toggle{font-size:13px;color:#ccc;display:flex;gap:8px;align-items:center}
+.feed{flex:1;overflow:auto;padding:28px 20px 170px;scroll-behavior:smooth}
+.welcome{max-width:720px;margin:14vh auto 0;text-align:center}
+.welcome h1{font-size:32px;line-height:1.2;margin:0 0 12px}
+.welcome p{color:var(--muted)}
+.message{width:min(790px,100%);margin:0 auto 24px;display:flex}
+.message.user{justify-content:flex-end}
+.bubble{max-width:85%;padding:12px 17px;border-radius:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.user .bubble{background:#303030;border:1px solid #414141}
+.assistant .bubble{padding-left:0;padding-right:0}
+.sources{width:min(790px,100%);margin:-14px auto 24px;display:flex;flex-wrap:wrap;gap:7px}
+.sources a{color:#c4d7ff;background:#292929;border:1px solid #414141;border-radius:9px;padding:6px 9px;text-decoration:none;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity{width:min(790px,100%);margin:0 auto 18px;border:1px solid #383838;background:rgba(26,26,26,.76);border-radius:15px;overflow:hidden;box-shadow:0 12px 28px #0002}
+.activity-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;color:#d7d7db;font-size:12px;border-bottom:1px solid #343434}
+.activity-state{display:inline-flex;align-items:center;gap:7px;color:#aeb0b7}
+.activity-state::before{content:"";width:7px;height:7px;border-radius:50%;background:#ddd;box-shadow:0 0 10px #ddd;animation:pulse 1.1s ease-in-out infinite}
+.activity.done .activity-state::before{animation:none;box-shadow:none;background:#888}
+.activity-log{padding:9px 12px 10px;max-height:120px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a7a9b2}
+.activity-line{padding:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:lineIn .16s ease}
+.activity-line::before{content:"› ";color:#eee}
+.activity-line.current::after{content:"";display:inline-block;width:6px;height:12px;margin-left:3px;vertical-align:-2px;background:#929292;animation:blink .8s steps(1) infinite}
+.activity.done{opacity:.72}
+.activity.done .activity-log{max-height:58px}
+.streaming-cursor{display:inline-block;width:7px;height:17px;margin-left:2px;vertical-align:-3px;background:#aaa;animation:blink .9s steps(1) infinite}
+.composer-area{position:fixed;bottom:0;left:260px;right:0;padding:18px 20px 22px;background:linear-gradient(transparent,var(--bg) 24%)}
+.composer{width:min(790px,100%);margin:auto;background:#2f2f2f;border:1px solid #505050;border-radius:25px;padding:10px 12px;box-shadow:0 5px 30px #0002}
+.composer textarea{display:block;width:100%;min-height:42px;max-height:180px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:8px 10px}
+.composer-bottom{display:flex;align-items:center;justify-content:space-between;padding:3px 3px 0 9px}
+.hint{font-size:11px;color:#999}
+.send{border:0;border-radius:50%;width:38px;height:38px;background:#f4f4f4;color:#161616;font-size:23px;cursor:pointer}
+.send:disabled{opacity:.45}
+.mobile-menu{display:none}
+@keyframes pulse{50%{opacity:.45;transform:scale(.82)}}@keyframes lineIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}@keyframes blink{50%{opacity:0}}
+@media(max-width:760px){
+.layout{grid-template-columns:1fr}
+.sidebar{position:fixed;z-index:5;inset:0 auto 0 0;width:270px;transform:translateX(-100%);transition:transform .2s;box-shadow:10px 0 30px #0005}
+.sidebar.open{transform:translateX(0)}
+.composer-area{left:0;padding:12px 12px 16px}.feed{padding:22px 14px 145px}.bubble{max-width:92%}
+.top{padding:9px 14px}.mobile-menu{display:inline-block}
+}
 </style>
 </head>
 <body>
@@ -21,27 +69,21 @@
 <div class="brand">✦ H2H Chat</div>
 <button class="btn" id="newChat">＋　Chat baru</button>
 <div class="thread-list" id="threadList"></div>
-<div class="side-bottom"><span>{{ fast_model }}</span><br><span>{{ thinking_model }}</span><br>Obrolan disimpan di browser ini.</div>
+<div class="side-bottom">{{ model }}<br>Web Search siap<br>Obrolan disimpan di browser ini.</div>
 </aside>
 <main class="main">
 <header class="top">
-<div class="top-left"><button class="btn mobile-menu" id="menu">☰</button><span class="model-badge" id="modelBadge">{{ fast_model }}</span></div>
-<div class="mode-switch" role="tablist">
-<button class="mode-btn active" data-mode="fast">⚡ Cepat</button>
-<button class="mode-btn" data-mode="thinking">🧠 Thinking</button>
-</div>
-<label class="toggle"><input type="checkbox" id="webSearch" checked> Web search</label>
+<div class="top-left"><button class="btn mobile-menu" id="menu">☰</button><span class="model-badge">{{ model }}</span></div>
+<label class="web-toggle"><input type="checkbox" id="webSearch" checked> Web search</label>
 </header>
 <section class="feed" id="feed"></section>
-<div class="composer-area"><div class="composer"><textarea id="input" rows="1" placeholder="Kirim pesan ke H2H Chat"></textarea><div class="composer-bottom"><span class="hint" id="hint">Cepat · Web search aktif</span><button class="send" id="send" aria-label="Kirim">↑</button></div></div></div>
+<div class="composer-area"><div class="composer"><textarea id="input" rows="1" placeholder="Kirim pesan ke H2H Chat"></textarea><div class="composer-bottom"><span class="hint" id="hint">Gemma 4 26B · Web search aktif</span><button class="send" id="send" aria-label="Kirim">↑</button></div></div></div>
 </main>
 </div>
 <script>
-const $=id=>document.getElementById(id),feed=$('feed'),input=$('input');let chats={},activeId=null,mode='fast';const STORAGE='h2h-chat-conversations-v1';
-const models={fast:{{ fast_model|tojson }},thinking:{{ thinking_model|tojson }}};
-
+const $=id=>document.getElementById(id),feed=$('feed'),input=$('input');let chats={},activeId=null;const STORAGE='h2h-chat-conversations-v1';
 function welcome(){feed.innerHTML='<div class="welcome"><h1>Ada yang ingin kamu bahas?</h1><p>Ngobrol soal Hearts2Hearts, cari update terbaru, atau tanya apa pun.</p></div>'}
-function load(){try{chats=JSON.parse(localStorage.getItem(STORAGE)||'{}')}catch{chats={}}const ids=Object.keys(chats).sort((a,b)=>chats[b].updated-chats[a].updated);if(ids.length)openChat(ids[0]);else newConversation();renderList();updateModeUI()}
+function load(){try{chats=JSON.parse(localStorage.getItem(STORAGE)||'{}')}catch{chats={}}const ids=Object.keys(chats).sort((a,b)=>chats[b].updated-chats[a].updated);if(ids.length)openChat(ids[0]);else newConversation();renderList();updateHint()}
 function persist(){try{localStorage.setItem(STORAGE,JSON.stringify(chats))}catch{}}
 function newConversation(){activeId=crypto.randomUUID?crypto.randomUUID():String(Date.now());chats[activeId]={title:'Chat baru',messages:[],updated:Date.now()};persist();renderList();renderChat();$('sidebar').classList.remove('open');input.focus()}
 function renderList(){const list=$('threadList');list.replaceChildren();Object.keys(chats).sort((a,b)=>chats[b].updated-chats[a].updated).forEach(id=>{const b=document.createElement('button');b.className='thread'+(id===activeId?' active':'');b.textContent=chats[id].title||'Chat baru';b.title=b.textContent;b.onclick=()=>openChat(id);list.appendChild(b)})}
@@ -50,63 +92,39 @@ function renderChat(){feed.replaceChildren();const messages=chats[activeId]?.mes
 function appendMessage(role,text,sources=[]){const row=document.createElement('div');row.className='message '+role;const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=text;row.appendChild(bubble);feed.appendChild(row);if(role==='assistant'&&sources.length)appendSources(sources)}
 function appendSources(sources){const box=document.createElement('div');box.className='sources';sources.forEach(s=>{try{const u=new URL(s.url);if(!['http:','https:'].includes(u.protocol))return;const a=document.createElement('a');a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=s.title||u.hostname;box.appendChild(a)}catch{}});if(box.childElementCount)feed.appendChild(box)}
 function ensureActivity(){let el=$('activity');if(!el){el=document.createElement('div');el.className='activity';el.id='activity';el.innerHTML='<div class="activity-head"><span>Aktivitas</span><span class="activity-state">sedang bekerja</span></div><div class="activity-log" id="activityLog"></div>';feed.appendChild(el)}return el}
-function addActivity(text,replaceCurrent=true){const log=$('activityLog');if(!log)return;const old=log.lastElementChild;if(replaceCurrent&&old&&old.dataset.live==='1'){old.textContent=text;old.dataset.live='1'}else{const line=document.createElement('div');line.className='activity-line current';line.dataset.live='1';line.textContent=text;log.appendChild(line)}Array.from(log.children).forEach((x,i)=>{if(i<log.children.length-4)x.remove()});feed.scrollTop=feed.scrollHeight}
-function activityDone(text='selesai'){const el=ensureActivity();const state=el.querySelector('.activity-state');state.textContent=text;el.classList.add('done');const current=el.querySelector('.activity-line.current');if(current)current.dataset.live='0';Array.from(el.querySelectorAll('.activity-line')).forEach(x=>x.classList.remove('current'));feed.scrollTop=feed.scrollHeight}
+function addActivity(text,append=false){const log=$('activityLog');if(!log)return;const old=log.lastElementChild;if(!append&&old&&old.dataset.live==='1'){old.textContent=text;return}const line=document.createElement('div');line.className='activity-line current';line.dataset.live='1';line.textContent=text;log.appendChild(line);Array.from(log.children).forEach((x,i)=>{if(i<log.children.length-5)x.remove()});feed.scrollTop=feed.scrollHeight}
+function activityDone(){const el=ensureActivity(),state=el.querySelector('.activity-state');state.textContent='selesai';el.classList.add('done');el.querySelectorAll('.activity-line').forEach(x=>x.classList.remove('current'));feed.scrollTop=feed.scrollHeight}
 function startStreamingAssistant(){const row=document.createElement('div');row.className='message assistant';const bubble=document.createElement('div');bubble.className='bubble';const cursor=document.createElement('span');cursor.className='streaming-cursor';bubble.appendChild(cursor);row.appendChild(bubble);feed.appendChild(row);return{row,bubble,cursor}}
 function addStreamToken(state,text){state.cursor.remove();state.bubble.appendChild(document.createTextNode(text));state.bubble.appendChild(state.cursor);feed.scrollTop=feed.scrollHeight}
 async function consumeChatStream(response,state){
-if(!response.body)throw new Error('Browser tidak menerima stream dari server. Coba refresh dan deploy ulang Vercel.');
-const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',sources=[],finished=false;
-while(true){
-  const {value,done}=await reader.read();
-  if(done)break;
-  buffer+=decoder.decode(value,{stream:true});
-  const parts=buffer.split(/\n\n/);buffer=parts.pop()||'';
-  for(const part of parts){
-    const line=part.split(/\n/).find(x=>x.startsWith('data: '));if(!line)continue;
-    const event=JSON.parse(line.slice(6));
-    if(event.type==='status'){
-      addActivity(event.text,true)
-    }else if(event.type==='heartbeat'){
-      addActivity('Model masih bekerja…',true)
-    }else if(event.type==='token'){
-      if(!state)state=startStreamingAssistant();
-      if($('activity'))addActivity('Jawaban sedang ditulis…',true);
-      addStreamToken(state,event.text)
-    }else if(event.type==='done'){
-      finished=true;
-      sources=event.sources||[];
-      if(state?.cursor)state.cursor.remove();
-      activityDone('selesai');
-      return sources;
-    }else if(event.type==='error'){
-      throw new Error(event.error||'Request gagal')
-    }
-  }
+if(!response.body)throw new Error('Server tidak mengirim stream.');
+const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',sources=[];
+while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parts=buffer.split(/\n\n/);buffer=parts.pop()||'';
+for(const part of parts){const line=part.split(/\n/).find(x=>x.startsWith('data: '));if(!line)continue;const event=JSON.parse(line.slice(6));
+if(event.type==='status'){addActivity(event.text,false)}
+else if(event.type==='token'){if($('activity'))addActivity('Jawaban sedang ditulis…',false);addStreamToken(state,event.text)}
+else if(event.type==='done'){sources=event.sources||[];activityDone();state.cursor.remove();return sources}
+else if(event.type==='error'){throw new Error(event.error||'Request gagal')}}}
+activityDone();return sources
 }
-if(!finished)activityDone('selesai');
-return sources
-}
-function updateModeUI(){document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));$('modelBadge').textContent=models[mode];$('hint').textContent=(mode==='thinking'?'Thinking':'Cepat')+' · '+($('webSearch').checked?'Web search aktif':'Web search mati')}
-document.querySelectorAll('.mode-btn').forEach(b=>b.onclick=()=>{if($('send').disabled)return;mode=b.dataset.mode;updateModeUI()});$('webSearch').onchange=updateModeUI;
-
+function updateHint(){$('hint').textContent='Gemma 4 26B · '+($('webSearch').checked?'Web search aktif':'Web search mati')}
+$('webSearch').onchange=updateHint;
 async function sendMessage(){
-const text=input.value.trim();if(!text||$('send').disabled)return;if(!activeId||!chats[activeId])newConversation();const c=chats[activeId];if(!c.messages.length)c.title=text.length>42?text.slice(0,42)+'…':text;c.messages.push({role:'user',content:text});c.updated=Date.now();persist();renderList();appendMessage('user',text);input.value='';input.style.height='auto';$('send').disabled=true;ensureActivity();addActivity('Menerima pertanyaan…',false);addActivity('Model dipilih · '+models[mode],false);
+const text=input.value.trim();if(!text||$('send').disabled)return;if(!activeId||!chats[activeId])newConversation();const c=chats[activeId];if(!c.messages.length)c.title=text.length>42?text.slice(0,42)+'…':text;
+c.messages.push({role:'user',content:text});c.updated=Date.now();persist();renderList();appendMessage('user',text);input.value='';input.style.height='auto';$('send').disabled=true;ensureActivity();addActivity('Mengirim pertanyaan…',true);addActivity('Memulai Gemma 4 26B…',true);
 let state=null;
 try{
 const prior=c.messages.slice(0,-1).map(m=>({role:m.role,content:m.content}));
-const response=await fetch('/api/chat',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message:text,history:prior,use_web:$('webSearch').checked,mode})});
+const response=await fetch('/api/chat',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message:text,history:prior,use_web:$('webSearch').checked})});
 if(!response.ok){let data={};try{data=await response.json()}catch{}throw new Error(data.error||'Request gagal')}
 state=startStreamingAssistant();
 const sources=await consumeChatStream(response,state);
-state.cursor.remove();
 const answer=state.bubble.textContent||'Model tidak mengembalikan jawaban.';
 c.messages.push({role:'assistant',content:answer,sources});appendSources(sources);
 }catch(e){
-$('activity')?.remove();state?.row?.remove();
-const raw=String(e?.message||e);
+$('activity')?.remove();state?.row?.remove();const raw=String(e?.message||e);
 const err=raw.toLowerCase().includes('failed to fetch')||raw.toLowerCase().includes('network')
-?'Koneksi ke server model terputus. Cek Cloudflare Tunnel/Kaggle masih aktif lalu coba kirim lagi.'
+?'Koneksi ke server model terputus. Pastikan Cloudflare Tunnel dan Ollama di Kaggle masih aktif, lalu coba lagi.'
 :'Ada kendala: '+raw;
 c.messages.push({role:'assistant',content:err});appendMessage('assistant',err)
 }
