@@ -248,8 +248,8 @@ def chat_api():
                             model=MODEL,
                             messages=messages,
                             stream=False,
-                            keep_alive="5m",
-                            options={"temperature": 0.7, "num_predict": 640},
+                            keep_alive="-1",
+                            options={"temperature": 0.7, "num_predict": 640, "num_ctx": 8192},
                         )
                         fallback_message = message_field(fallback, "message", None)
                         fallback_text = message_field(fallback_message, "content", "")
@@ -276,8 +276,8 @@ def chat_api():
                     model=MODEL,
                     messages=messages,
                     stream=False,
-                    keep_alive="5m",
-                    options={"temperature": 0.7, "num_predict": 640},
+                    keep_alive="-1",
+                    options={"temperature": 0.7, "num_predict": 640, "num_ctx": 8192},
                 )
                 fallback_message = message_field(fallback, "message", None)
                 fallback_text = message_field(fallback_message, "content", "")
