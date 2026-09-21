@@ -34,10 +34,8 @@ def get_search_client():
 def web_search_direct(query, max_results=4):
     """Call Ollama's official Web Search REST API directly."""
     key = get_search_client()
-    payload = json.dumps({
-        "query": query,
-        "max_results": max_results,
-    }).encode("utf-8")
+    # The documented REST body only requires query; cap results locally.
+    payload = json.dumps({"query": query}).encode("utf-8")
     req = urllib.request.Request(
         "https://ollama.com/api/web_search",
         data=payload,
@@ -160,10 +158,15 @@ def chat_api():
             if use_web:
                 yield sse({"type": "status", "text": "Mencari informasi terbaru di web…"})
                 try:
-                    sources = web_search_direct(
-                        query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
-                        max_results=4,
-                    )
+                    primary_query = f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop"
+                    sources = web_search_direct(query=primary_query, max_results=4)
+
+                    # Some queries are too specific for search engines. Retry once
+                    # with the user's natural wording if the first search is empty.
+                    if not sources:
+                        yield sse({"type": "status", "text": "Hasil kosong · mencoba pencarian yang lebih umum…"})
+                        sources = web_search_direct(query=question, max_results=4)
+
                     yield sse({
                         "type": "status",
                         "text": f"Web search selesai · {len(sources)} sumber ditemukan",
