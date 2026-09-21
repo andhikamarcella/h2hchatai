@@ -1,5 +1,8 @@
 import json
 import os
+import queue
+import threading
+import time
 from datetime import date
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -47,6 +50,39 @@ def sse(event):
 def model_for_mode(mode):
     return THINKING_MODEL if mode == "thinking" else FAST_MODEL
 
+def stream_model_with_heartbeats(client, **kwargs):
+    """Run model streaming in a worker so the HTTP response can send heartbeats."""
+    events = queue.Queue()
+    done = object()
+
+    def worker():
+        try:
+            stream = client.chat(**kwargs)
+            for chunk in stream:
+                events.put(("chunk", chunk))
+        except Exception as exc:
+            events.put(("error", exc))
+        finally:
+            events.put(("done", done))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+    while True:
+        try:
+            kind, payload = events.get(timeout=12)
+        except queue.Empty:
+            # Keeps Cloudflare's proxy connection active while a slow model is generating.
+            yield None
+            continue
+
+        if kind == "chunk":
+            yield payload
+        elif kind == "error":
+            raise payload
+        elif kind == "done":
+            break
+
 @app.get("/")
 def index():
     return render_template(
@@ -91,14 +127,11 @@ def chat_api():
 
             yield sse({
                 "type": "status",
-                "text": (
-                    f"Mode {('thinking' if mode == 'thinking' else 'cepat')} aktif · "
-                    f"{model}"
-                ),
+                "text": f"Mode {('thinking' if mode == 'thinking' else 'cepat')} · {model}",
             })
 
             if use_web:
-                yield sse({"type": "status", "text": "Mencari informasi terbaru di web…"})
+                yield sse({"type": "status", "text": "Membuka pencarian web…"})
                 try:
                     search = get_search_client().web_search(
                         query=f"{question} latest current {date.today().isoformat()} Hearts2Hearts K-pop",
@@ -109,13 +142,11 @@ def chat_api():
                         "type": "status",
                         "text": f"Web search selesai · {len(sources)} sumber ditemukan",
                     })
-                    for source in sources:
-                        title = source["title"].strip()
-                        if title:
-                            yield sse({
-                                "type": "activity",
-                                "text": f"Meninjau sumber · {title}",
-                            })
+                    if sources:
+                        yield sse({
+                            "type": "status",
+                            "text": f"Membaca {min(len(sources), 6)} sumber dan menyusun konteks…",
+                        })
                     web_context = "\n\n".join(
                         f"Judul: {x['title']}\nURL: {x['url']}\n{x['content']}"
                         for x in sources
@@ -123,14 +154,14 @@ def chat_api():
                 except Exception as exc:
                     yield sse({
                         "type": "status",
-                        "text": "Web search gagal · melanjutkan tanpa hasil web",
+                        "text": "Web search gagal · lanjut memakai percakapan",
                     })
                     web_context = (
                         f"Pencarian web gagal ({exc}). "
                         "Jangan berpura-pura telah melakukan pencarian."
                     )
             else:
-                yield sse({"type": "status", "text": "Web search dimatikan · memakai konteks chat"})
+                yield sse({"type": "status", "text": "Web search mati · memakai konteks chat"})
 
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
             for item in history[-16:]:
@@ -144,16 +175,14 @@ def chat_api():
             )
             messages.append({"role": "user", "content": current})
 
-            if mode == "thinking":
-                yield sse({
-                    "type": "status",
-                    "text": "Menganalisis konteks dan menyusun jawaban…",
-                })
-            else:
-                yield sse({
-                    "type": "status",
-                    "text": "Menyiapkan jawaban cepat…",
-                })
+            yield sse({
+                "type": "status",
+                "text": (
+                    "Menganalisis pertanyaan dan konteks…"
+                    if mode == "thinking"
+                    else "Menyiapkan jawaban cepat…"
+                ),
+            })
 
             client = get_model_client()
             kwargs = {
@@ -164,19 +193,24 @@ def chat_api():
             if mode == "thinking":
                 kwargs["think"] = True
 
+            # Compatibility fallback for older Ollama Python clients.
             try:
-                stream = client.chat(**kwargs)
+                stream = stream_model_with_heartbeats(client, **kwargs)
             except TypeError:
-                # Compatibility fallback for older Ollama Python clients.
                 kwargs.pop("think", None)
-                stream = client.chat(**kwargs)
+                stream = stream_model_with_heartbeats(client, **kwargs)
 
-            yield sse({
-                "type": "status",
-                "text": "Model sedang menulis jawaban…",
-            })
+            yield sse({"type": "status", "text": "Model mulai bekerja…"})
+            last_heartbeat = time.monotonic()
 
             for chunk in stream:
+                if chunk is None:
+                    now = time.monotonic()
+                    if now - last_heartbeat >= 10:
+                        yield sse({"type": "heartbeat", "text": "Masih bekerja…"})
+                        last_heartbeat = now
+                    continue
+
                 token = getattr(getattr(chunk, "message", None), "content", "") or ""
                 if token:
                     yield sse({"type": "token", "text": token})
@@ -198,6 +232,7 @@ def chat_api():
         headers={
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
 
