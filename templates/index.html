@@ -55,6 +55,7 @@ function activityDone(text='selesai'){const el=ensureActivity();const state=el.q
 function startStreamingAssistant(){const row=document.createElement('div');row.className='message assistant';const bubble=document.createElement('div');bubble.className='bubble';const cursor=document.createElement('span');cursor.className='streaming-cursor';bubble.appendChild(cursor);row.appendChild(bubble);feed.appendChild(row);return{row,bubble,cursor}}
 function addStreamToken(state,text){state.cursor.remove();state.bubble.appendChild(document.createTextNode(text));state.bubble.appendChild(state.cursor);feed.scrollTop=feed.scrollHeight}
 async function consumeChatStream(response,state){
+if(!response.body)throw new Error('Browser tidak menerima stream dari server. Coba refresh dan deploy ulang Vercel.');
 const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',sources=[],finished=false;
 while(true){
   const {value,done}=await reader.read();
@@ -94,14 +95,21 @@ const text=input.value.trim();if(!text||$('send').disabled)return;if(!activeId||
 let state=null;
 try{
 const prior=c.messages.slice(0,-1).map(m=>({role:m.role,content:m.content}));
-const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,history:prior,use_web:$('webSearch').checked,mode})});
+const response=await fetch('/api/chat',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message:text,history:prior,use_web:$('webSearch').checked,mode})});
 if(!response.ok){let data={};try{data=await response.json()}catch{}throw new Error(data.error||'Request gagal')}
 state=startStreamingAssistant();
 const sources=await consumeChatStream(response,state);
 state.cursor.remove();
 const answer=state.bubble.textContent||'Model tidak mengembalikan jawaban.';
 c.messages.push({role:'assistant',content:answer,sources});appendSources(sources);
-}catch(e){$('activity')?.remove();state?.row?.remove();const err='Ada kendala: '+e.message;c.messages.push({role:'assistant',content:err});appendMessage('assistant',err)}
+}catch(e){
+$('activity')?.remove();state?.row?.remove();
+const raw=String(e?.message||e);
+const err=raw.toLowerCase().includes('failed to fetch')||raw.toLowerCase().includes('network')
+?'Koneksi ke server model terputus. Cek Cloudflare Tunnel/Kaggle masih aktif lalu coba kirim lagi.'
+:'Ada kendala: '+raw;
+c.messages.push({role:'assistant',content:err});appendMessage('assistant',err)
+}
 finally{c.updated=Date.now();persist();renderList();$('send').disabled=false;input.focus();feed.scrollTop=feed.scrollHeight}
 }
 $('send').addEventListener('click',sendMessage);input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px'});input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}});$('newChat').onclick=newConversation;$('menu').onclick=()=>$('sidebar').classList.toggle('open');load();
