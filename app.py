@@ -203,6 +203,7 @@ def chat_api():
             yield sse({"type": "status", "text": "Model mulai bekerja…"})
             last_heartbeat = time.monotonic()
 
+            finished = False
             for chunk in stream:
                 if chunk is None:
                     now = time.monotonic()
@@ -215,14 +216,30 @@ def chat_api():
                 if token:
                     yield sse({"type": "token", "text": token})
 
-            yield sse({
-                "type": "done",
-                "sources": [
-                    {"title": x["title"], "url": x["url"]}
-                    for x in sources
-                    if x["title"] and x["url"]
-                ],
-            })
+                # Ollama marks the final streamed response with done=True.
+                # Signal completion immediately instead of waiting for the
+                # generator/HTTP connection to close.
+                if bool(getattr(chunk, "done", False)):
+                    finished = True
+                    yield sse({
+                        "type": "done",
+                        "sources": [
+                            {"title": x["title"], "url": x["url"]}
+                            for x in sources
+                            if x["title"] and x["url"]
+                        ],
+                    })
+                    break
+
+            if not finished:
+                yield sse({
+                    "type": "done",
+                    "sources": [
+                        {"title": x["title"], "url": x["url"]}
+                        for x in sources
+                        if x["title"] and x["url"]
+                    ],
+                })
         except Exception as exc:
             yield sse({"type": "error", "error": f"Ollama gagal: {exc}"})
 
