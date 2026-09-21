@@ -44,7 +44,7 @@ body{margin:0;background:radial-gradient(circle at 72% -10%,#303030 0,transparen
 .activity-line.current::after{content:"";display:inline-block;width:6px;height:12px;margin-left:3px;vertical-align:-2px;background:#929292;animation:blink .8s steps(1) infinite}
 .activity.done{opacity:.72}
 .activity.done .activity-log{max-height:58px}
-.streaming-cursor{display:inline-block;width:7px;height:17px;margin-left:2px;vertical-align:-3px;background:#aaa;animation:blink .9s steps(1) infinite}
+.activity-line.current::after{content:"";display:inline-block;width:6px;height:12px;margin-left:3px;vertical-align:-2px;background:#929292;animation:blink .8s steps(1) infinite}
 .composer-area{position:fixed;bottom:0;left:260px;right:0;padding:18px 20px 22px;background:linear-gradient(transparent,var(--bg) 24%)}
 .composer{width:min(790px,100%);margin:auto;background:#2f2f2f;border:1px solid #505050;border-radius:25px;padding:10px 12px;box-shadow:0 5px 30px #0002}
 .composer textarea{display:block;width:100%;min-height:42px;max-height:180px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:8px 10px}
@@ -92,47 +92,51 @@ function renderChat(){feed.replaceChildren();const messages=chats[activeId]?.mes
 function appendMessage(role,text,sources=[]){const row=document.createElement('div');row.className='message '+role;const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=text;row.appendChild(bubble);feed.appendChild(row);if(role==='assistant'&&sources.length)appendSources(sources)}
 function appendSources(sources){const box=document.createElement('div');box.className='sources';sources.forEach(s=>{try{const u=new URL(s.url);if(!['http:','https:'].includes(u.protocol))return;const a=document.createElement('a');a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=s.title||u.hostname;box.appendChild(a)}catch{}});if(box.childElementCount)feed.appendChild(box)}
 function ensureActivity(){let el=$('activity');if(!el){el=document.createElement('div');el.className='activity';el.id='activity';el.innerHTML='<div class="activity-head"><span>Aktivitas</span><span class="activity-state">sedang bekerja</span></div><div class="activity-log" id="activityLog"></div>';feed.appendChild(el)}return el}
-function addActivity(text,append=false){const log=$('activityLog');if(!log)return;const old=log.lastElementChild;if(!append&&old&&old.dataset.live==='1'){old.textContent=text;return}const line=document.createElement('div');line.className='activity-line current';line.dataset.live='1';line.textContent=text;log.appendChild(line);Array.from(log.children).forEach((x,i)=>{if(i<log.children.length-5)x.remove()});feed.scrollTop=feed.scrollHeight}
-function activityDone(){const el=ensureActivity(),state=el.querySelector('.activity-state');state.textContent='selesai';el.classList.add('done');el.querySelectorAll('.activity-line').forEach(x=>x.classList.remove('current'));feed.scrollTop=feed.scrollHeight}
-function startStreamingAssistant(){const row=document.createElement('div');row.className='message assistant';const bubble=document.createElement('div');bubble.className='bubble';const cursor=document.createElement('span');cursor.className='streaming-cursor';bubble.appendChild(cursor);row.appendChild(bubble);feed.appendChild(row);return{row,bubble,cursor}}
-function addStreamToken(state,text){state.cursor.remove();state.bubble.appendChild(document.createTextNode(text));state.bubble.appendChild(state.cursor);feed.scrollTop=feed.scrollHeight}
-async function consumeChatStream(response,state){
-if(!response.body)throw new Error('Server tidak mengirim stream.');
-const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',sources=[];
-while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parts=buffer.split(/\n\n/);buffer=parts.pop()||'';
-for(const part of parts){const line=part.split(/\n/).find(x=>x.startsWith('data: '));if(!line)continue;const event=JSON.parse(line.slice(6));
-if(event.type==='status'){addActivity(event.text,false)}
-else if(event.type==='activity'){addActivity(event.text,false)}
-else if(event.type==='token'){if($('activity'))addActivity('Jawaban sedang ditulis…',false);addStreamToken(state,event.text)}
-else if(event.type==='done'){sources=event.sources||[];activityDone();state.cursor.remove();return sources}
-else if(event.type==='error'){throw new Error(event.error||'Request gagal')}}}
-activityDone();return sources
-}
+function setActivity(text){const log=$('activityLog');if(!log)return;let line=log.lastElementChild;if(!line){line=document.createElement('div');line.className='activity-line current';log.appendChild(line)}line.textContent=text;Array.from(log.children).forEach(x=>x.classList.remove('current'));line.classList.add('current');feed.scrollTop=feed.scrollHeight}
+function activityDone(){const el=ensureActivity();el.querySelector('.activity-state').textContent='selesai';el.classList.add('done');el.querySelectorAll('.activity-line').forEach(x=>x.classList.remove('current'));feed.scrollTop=feed.scrollHeight}
 function updateHint(){$('hint').textContent='Gemma 4 26B · '+($('webSearch').checked?'Web search aktif':'Web search mati')}
 $('webSearch').onchange=updateHint;
+
 async function sendMessage(){
-const text=input.value.trim();if(!text||$('send').disabled)return;if(!activeId||!chats[activeId])newConversation();const c=chats[activeId];if(!c.messages.length)c.title=text.length>42?text.slice(0,42)+'…':text;
-c.messages.push({role:'user',content:text});c.updated=Date.now();persist();renderList();appendMessage('user',text);input.value='';input.style.height='auto';$('send').disabled=true;ensureActivity();addActivity('Mengirim pertanyaan…',true);addActivity('Memulai Gemma 4 26B…',true);
-let state=null;
+const text=input.value.trim();if(!text||$('send').disabled)return;if(!activeId||!chats[activeId])newConversation();const c=chats[activeId];
+if(!c.messages.length)c.title=text.length>42?text.slice(0,42)+'…':text;
+c.messages.push({role:'user',content:text});c.updated=Date.now();persist();renderList();appendMessage('user',text);
+input.value='';input.style.height='auto';$('send').disabled=true;ensureActivity();
+
+const steps=$('webSearch').checked
+?['Mengirim pertanyaan…','Mencari informasi terbaru…','Membaca hasil pencarian…','Menyusun konteks…','Gemma 4 26B sedang menulis…']
+:['Mengirim pertanyaan…','Menyiapkan konteks…','Gemma 4 26B sedang menulis…'];
+
+let step=0;
+setActivity(steps[0]);
+const timer=setInterval(()=>{step++;if(step<steps.length)setActivity(steps[step])},2200);
+
 try{
 const prior=c.messages.slice(0,-1).map(m=>({role:m.role,content:m.content}));
-const response=await fetch('/api/chat',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'text/event-stream'},body:JSON.stringify({message:text,history:prior,use_web:$('webSearch').checked})});
-if(!response.ok){let data={};try{data=await response.json()}catch{}throw new Error(data.error||'Request gagal')}
-state=startStreamingAssistant();
-const sources=await consumeChatStream(response,state);
-const answer=(state?.bubble?.textContent||'').trim();
-if(!answer){
-  throw new Error('Server selesai tetapi teks jawaban kosong. Pastikan Gemma 4 26B tersedia di Ollama Kaggle.');
-}
-c.messages.push({role:'assistant',content:answer,sources});appendSources(sources);
+const controller=new AbortController();
+const timeout=setTimeout(()=>controller.abort(),295000);
+let response;
+try{
+response=await fetch('/api/chat',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({message:text,history:prior,use_web:$('webSearch').checked}),signal:controller.signal});
+}catch(fetchError){
+if(fetchError.name==='AbortError')throw new Error('Request melewati batas waktu.');
+throw new Error('Koneksi ke H2H server gagal. Cek Cloudflare Tunnel Kaggle dan OLLAMA_HOST di Vercel.');
+}finally{clearTimeout(timeout)}
+let data={};
+try{data=await response.json()}catch{throw new Error('Server tidak mengembalikan JSON yang valid.')}
+if(!response.ok)throw new Error(data.error||('Server error '+response.status));
+const answer=String(data.answer||'').trim();
+if(!answer)throw new Error('Server mengembalikan jawaban kosong.');
+c.messages.push({role:'assistant',content:answer,sources:data.sources||[]});
+appendMessage('assistant',answer,data.sources||[]);
+activityDone();
 }catch(e){
-$('activity')?.remove();state?.row?.remove();const raw=String(e?.message||e);
-const err=raw.toLowerCase().includes('failed to fetch')||raw.toLowerCase().includes('network')
-?'Koneksi ke server model terputus. Pastikan Cloudflare Tunnel dan Ollama di Kaggle masih aktif, lalu coba lagi.'
-:'Ada kendala: '+raw;
-c.messages.push({role:'assistant',content:err});appendMessage('assistant',err)
+$('activity')?.remove();
+const err='Ada kendala: '+(e.message||e);
+c.messages.push({role:'assistant',content:err});appendMessage('assistant',err);
+}finally{
+clearInterval(timer);c.updated=Date.now();persist();renderList();$('send').disabled=false;input.focus();feed.scrollTop=feed.scrollHeight
 }
-finally{c.updated=Date.now();persist();renderList();$('send').disabled=false;input.focus();feed.scrollTop=feed.scrollHeight}
 }
 $('send').addEventListener('click',sendMessage);input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px'});input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}});$('newChat').onclick=newConversation;$('menu').onclick=()=>$('sidebar').classList.toggle('open');load();
 </script>
